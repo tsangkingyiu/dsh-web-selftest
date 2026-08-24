@@ -3,6 +3,7 @@ import type ToolRegistry from '@deepseek-ai/dsh-tools'
 import { WebHostController } from './web-host.js'
 import { createWebTools, WEB_TOOL_NAMES } from './tools.js'
 import { registerWebSkill } from './skill.js'
+import { installStreamRoutes } from './stream-routes.js'
 
 export const name = 'dsh-web-selftest'
 export const inject = ['tools']
@@ -22,6 +23,8 @@ export function apply(ctx: Context): () => Promise<void> {
   for (const tool of Object.values(tools)) {
     disposers.push(ctx.effect(() => hostCtx.tools.register(tool), `dsh-web-selftest:${tool.name}`))
   }
+
+  installStreamRoutes(ctx, host)
 
   ctx.logger.info(`dsh-web-selftest mounted (${WEB_TOOL_NAMES.join(' + ')})`)
 
