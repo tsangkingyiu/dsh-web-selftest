@@ -43,7 +43,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "3.18.1"
+    "playwright-core": "1.62.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

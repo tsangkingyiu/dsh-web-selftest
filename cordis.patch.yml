@@ -3,6 +3,3 @@
 - insert:
     - id: "web-selftest"
       name: "dsh-web-selftest"
-      config:
-        defaultMode: upper
-        maxLength: 10000

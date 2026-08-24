@@ -1,75 +1,74 @@
-import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { describe, it, before, after } from 'node:test'
+import assert from 'node:assert'
+import { WebHostController } from '../dist/web-host.js'
+import { createWebTools, WEB_TOOL_NAMES } from '../dist/tools.js'
 
-import { Config, MODES, apply, normalizeConfig, transformText } from '../dist/index.js'
+describe('dsh-web-selftest tools', () => {
+  let host
+  let tools
+  const sessionId = 'test-session'
 
-test('exports a Standard Schema with closed runtime normalization', () => {
-  assert.equal(Config['~standard'].version, 1)
-  assert.deepEqual(normalizeConfig({}), { defaultMode: 'upper', maxLength: 10_000 })
-  assert.throws(() => normalizeConfig({ unexpected: true }), /unknown config key/)
-  assert.throws(() => normalizeConfig({ maxLength: 0 }))
-})
-
-test('pure transformation covers every declared mode', () => {
-  assert.deepEqual([...MODES], ['upper', 'lower', 'title'])
-  assert.equal(transformText('Hello', 'upper'), 'HELLO')
-  assert.equal(transformText('Hello', 'lower'), 'hello')
-  assert.equal(transformText('hello world', 'title'), 'Hello World')
-})
-
-test('tool reports truncation to both structured output and rendered content', async () => {
-  let definition
-  apply({
-    tools: {
-      register(value) {
-        definition = value
-        return () => {}
-      },
-    },
-  }, { defaultMode: 'upper', maxLength: 3 })
-
-  assert.ok(definition)
-  const execution = { signal: new AbortController().signal }
-  const result = await definition.execute({ text: 'abcdef' }, execution)
-  assert.deepEqual(result, {
-    text: 'ABC',
-    mode: 'upper',
-    originalLength: 6,
-    processedLength: 3,
-    truncated: true,
+  before(async () => {
+    host = new WebHostController()
+    tools = createWebTools(host)
   })
-  const rendered = definition.output.render({}, result)
-  assert.match(rendered[0].text, /TRUNCATED: processed 3 of 6/)
-  await assert.rejects(() => definition.execute({ text: 'x', extra: true }, execution), /unknown tool argument/)
-})
 
-test('tool truncates and counts by Unicode code point without splitting emoji', async () => {
-  let definition
-  apply({ tools: { register(value) { definition = value; return () => {} } } }, {
-    defaultMode: 'upper',
-    maxLength: 2,
+  after(async () => {
+    await host.dispose()
   })
-  const result = await definition.execute(
-    { text: 'a😀b' },
-    { signal: new AbortController().signal },
-  )
-  assert.deepEqual(result, {
-    text: 'A😀',
-    mode: 'upper',
-    originalLength: 3,
-    processedLength: 2,
-    truncated: true,
-  })
-  assert.equal([...result.text].length, 2)
-})
 
-test('tool honors an already-aborted execution', async () => {
-  let definition
-  apply({ tools: { register(value) { definition = value; return () => {} } } }, {})
-  const controller = new AbortController()
-  controller.abort()
-  await assert.rejects(
-    () => definition.execute({ text: 'hello' }, { signal: controller.signal }),
-    /aborted before start/,
-  )
+  it('exports all expected tools', () => {
+    assert.deepStrictEqual(Object.keys(tools).length, WEB_TOOL_NAMES.length)
+    for (const name of WEB_TOOL_NAMES) {
+      assert.ok(Object.values(tools).some(t => t.name === name), `missing tool ${name}`)
+    }
+  })
+
+  it('web_launch creates a session', async () => {
+    const result = await tools.webLaunch.execute({ sessionId }, { signal: AbortSignal.timeout(30_000) })
+    assert.strictEqual(result.sessionId, sessionId)
+    assert.ok(result.viewport.width > 0)
+  })
+
+  it('web_navigate returns title and status', async () => {
+    const result = await tools.webNavigate.execute(
+      { sessionId, url: 'data:text/html,<title>Hello</title><p>world</p>' },
+      { signal: AbortSignal.timeout(30_000) },
+    )
+    assert.strictEqual(result.title, 'Hello')
+    assert.strictEqual(result.status, 0) // data: URLs have no HTTP response status
+  })
+
+  it('web_snapshot returns aria snapshot', async () => {
+    const result = await tools.webSnapshot.execute({ sessionId }, { signal: AbortSignal.timeout(30_000) })
+    assert.ok(typeof result.snapshot === 'string')
+    assert.ok(result.snapshot.includes('world'))
+  })
+
+  it('web_screenshot returns path and bytes', async () => {
+    const result = await tools.webScreenshot.execute({ sessionId }, { signal: AbortSignal.timeout(30_000) })
+    assert.ok(result.path.endsWith('.png'))
+    assert.ok(result.bytes > 0)
+  })
+
+  it('web_interact with expect_text verifies content', async () => {
+    const result = await tools.webInteract.execute(
+      { sessionId, action: 'press', key: 'Enter', expect_text: 'world' },
+      { signal: AbortSignal.timeout(30_000) },
+    )
+    assert.strictEqual(result.matched, true)
+  })
+
+  it('web_wait_for finds text', async () => {
+    const result = await tools.webWaitFor.execute(
+      { sessionId, text: 'world', mode: 'appear', timeout_ms: 2000 },
+      { signal: AbortSignal.timeout(30_000) },
+    )
+    assert.strictEqual(result.matched, true)
+  })
+
+  it('web_close closes the session', async () => {
+    const result = await tools.webClose.execute({ sessionId }, { signal: AbortSignal.timeout(30_000) })
+    assert.strictEqual(result.closed, true)
+  })
 })

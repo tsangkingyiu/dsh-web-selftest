@@ -1,105 +1,32 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type ToolRegistry from '@deepseek-ai/dsh-tools'
+import { WebHostController } from './web-host.js'
+import { createWebTools, WEB_TOOL_NAMES } from './tools.js'
+import { registerWebSkill } from './skill.js'
 
-import { Config, MODES, normalizeConfig, type Mode } from './config.js'
-
-export { Config, MODES, normalizeConfig }
-export type { Mode }
-
-export const name = "dsh-web-selftest"
+export const name = 'dsh-web-selftest'
 export const inject = ['tools']
 
-export type TransformResult = {
-  text: string
-  mode: Mode
-  /** Input Unicode code points before truncation. */
-  originalLength: number
-  /** Input Unicode code points passed to the transformation. */
-  processedLength: number
-  truncated: boolean
+type HostContext = Context & {
+  tools: ToolRegistry
 }
 
-export function transformText(input: string, mode: Mode): string {
-  switch (mode) {
-    case 'upper':
-      return input.toUpperCase()
-    case 'lower':
-      return input.toLowerCase()
-    case 'title':
-      return input.replace(/\b\w/g, character => character.toUpperCase())
+export function apply(ctx: Context): () => Promise<void> {
+  const hostCtx = ctx as HostContext
+  const host = new WebHostController()
+  const tools = createWebTools(host)
+
+  const disposers: Array<() => void | Promise<void>> = []
+  disposers.push(registerWebSkill(ctx))
+
+  for (const tool of Object.values(tools)) {
+    disposers.push(ctx.effect(() => hostCtx.tools.register(tool), `dsh-web-selftest:${tool.name}`))
   }
-}
 
-const ARGUMENT_KEYS = new Set(['text', 'mode'])
+  ctx.logger.info(`dsh-web-selftest mounted (${WEB_TOOL_NAMES.join(' + ')})`)
 
-function rejectUnknownArguments(value: Record<string, unknown>): void {
-  const unknown = Object.keys(value).filter(key => !ARGUMENT_KEYS.has(key)).sort()
-  if (unknown.length > 0) throw new TypeError(`unknown tool argument(s): ${unknown.join(', ')}`)
-}
-
-export function apply(ctx: Context, inputConfig: Config): void {
-  const config = normalizeConfig(inputConfig)
-
-  // This is the only lifecycle-owned effect. Cordis owns and disposes the
-  // registration with the current fiber. The tool creates no timers, handles,
-  // subprocesses, files, network calls, or other resources that could outlive it.
-  ctx.tools.register(
-    defineTool({
-      name: "web_launch",
-      description: `${"DeepSeek Harness plugin for headless browser UI auto-testing and live interactive screencast streaming."} Use it only for a deterministic in-memory string transformation.`,
-      parameters: {
-        text: {
-          type: 'string',
-          required: true,
-          description: 'Text to transform.',
-        },
-        mode: {
-          type: 'string',
-          enum: MODES,
-          description: 'Transformation mode; defaults to the plugin configuration.',
-        },
-      },
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            text: { type: 'string', required: true },
-            mode: { type: 'string', enum: MODES, required: true },
-            originalLength: { type: 'number', required: true },
-            processedLength: { type: 'number', required: true },
-            truncated: { type: 'boolean', required: true },
-          },
-        },
-        render: (_args, value) => [{
-          type: 'text',
-          text: value.truncated
-            ? `${value.text}\n\n[TRUNCATED: processed ${value.processedLength} of ${value.originalLength} input code points]`
-            : `${value.text}\n\n[complete: ${value.processedLength} input code points]`,
-        }],
-      },
-      isConcurrencySafe: () => true,
-      async execute(args, execution: ToolRunContext): Promise<TransformResult> {
-        if (execution.signal.aborted) throw new Error(`${"web_launch"}: aborted before start`)
-        rejectUnknownArguments(args)
-        const mode: Mode = args.mode ?? config.defaultMode
-        // Array iteration follows Unicode code points, so truncation never
-        // splits an astral character's UTF-16 surrogate pair.
-        const inputCodePoints = [...args.text]
-        const originalLength = inputCodePoints.length
-        const truncated = originalLength > config.maxLength
-        const sourceCodePoints = truncated ? inputCodePoints.slice(0, config.maxLength) : inputCodePoints
-        const source = sourceCodePoints.join('')
-        const text = transformText(source, mode)
-        if (execution.signal.aborted) throw new Error(`${"web_launch"}: aborted during execution`)
-        return {
-          text,
-          mode,
-          originalLength,
-          processedLength: sourceCodePoints.length,
-          truncated,
-        }
-      },
-    }),
-  )
+  return async () => {
+    for (const dispose of disposers.reverse()) await dispose()
+    await host.dispose()
+  }
 }
