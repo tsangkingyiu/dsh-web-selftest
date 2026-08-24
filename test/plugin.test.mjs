@@ -71,6 +71,12 @@ describe('dsh-web-selftest tools', () => {
     assert.strictEqual(result.matched, true)
   })
 
+  it('web_console captures console messages and page errors', async () => {
+    const result = await tools.webConsole.execute({ sessionId, limit: 10 }, { signal: AbortSignal.timeout(30_000) })
+    assert.ok(Array.isArray(result.messages))
+    assert.ok(Array.isArray(result.errors))
+  })
+
   it('web_close closes the session', async () => {
     const result = await tools.webClose.execute({ sessionId }, { signal: AbortSignal.timeout(30_000) })
     assert.strictEqual(result.closed, true)

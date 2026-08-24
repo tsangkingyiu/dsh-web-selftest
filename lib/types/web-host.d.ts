@@ -3,6 +3,17 @@ export type WebSession = {
     sessionId: string;
     context: BrowserContext;
     page: Page;
+    consoleMessages: Array<{
+        type: string;
+        text: string;
+        timestamp: number;
+    }>;
+    pageErrors: Array<{
+        message: string;
+        stack?: string;
+        timestamp: number;
+    }>;
+    maxConsoleMessages: number;
 };
 export declare class WebHostController {
     private browser;

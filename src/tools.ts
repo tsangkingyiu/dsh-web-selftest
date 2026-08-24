@@ -295,6 +295,7 @@ export function createWebTools(host: WebHostController): WebTools {
         additionalProperties: false,
         properties: {
           messages: { type: 'array', required: true },
+          errors: { type: 'array', required: true },
         },
       },
       render: renderJson,
@@ -302,8 +303,11 @@ export function createWebTools(host: WebHostController): WebTools {
     async execute(args: { sessionId: string; limit?: number }) {
       const session = host.getSession(args.sessionId)
       if (!session) throw new Error(`session ${args.sessionId} not found`)
-      // Note: console capture must be set up at session creation; here we return a stub
-      return { messages: [] }
+      const limit = args.limit ?? 50
+      return {
+        messages: session.consoleMessages.slice(-limit),
+        errors: session.pageErrors.slice(-limit),
+      }
     },
   })
 

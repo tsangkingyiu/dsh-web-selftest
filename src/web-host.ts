@@ -4,6 +4,9 @@ export type WebSession = {
   sessionId: string
   context: BrowserContext
   page: Page
+  consoleMessages: Array<{ type: string; text: string; timestamp: number }>
+  pageErrors: Array<{ message: string; stack?: string; timestamp: number }>
+  maxConsoleMessages: number
 }
 
 export class WebHostController {
@@ -25,7 +28,26 @@ export class WebHostController {
     const browser = await this.ensureBrowser()
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
     const page = await context.newPage()
-    const session = { sessionId, context, page }
+    const session: WebSession = {
+      sessionId,
+      context,
+      page,
+      consoleMessages: [],
+      pageErrors: [],
+      maxConsoleMessages: 200,
+    }
+    page.on('console', msg => {
+      session.consoleMessages.push({ type: msg.type(), text: msg.text(), timestamp: Date.now() })
+      if (session.consoleMessages.length > session.maxConsoleMessages) session.consoleMessages.shift()
+    })
+    page.on('pageerror', error => {
+      session.pageErrors.push({
+        message: error.message,
+        ...(error.stack !== undefined ? { stack: error.stack } : {}),
+        timestamp: Date.now(),
+      })
+      if (session.pageErrors.length > session.maxConsoleMessages) session.pageErrors.shift()
+    })
     this.sessions.set(sessionId, session)
     this.resetIdleTimer()
     return session
