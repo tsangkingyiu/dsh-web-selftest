@@ -2,4 +2,4 @@
 # A later patch that changes this row's config must restate every retained key.
 - insert:
     - id: "web-selftest"
-      name: "dsh-web-selftest"
+      name: "@tsangkingyiu/dsh-web-selftest"

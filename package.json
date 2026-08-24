@@ -1,5 +1,5 @@
 {
-  "name": "dsh-web-selftest",
+  "name": "@tsangkingyiu/dsh-web-selftest",
   "version": "0.1.0",
   "description": "DeepSeek Harness plugin for headless browser UI auto-testing and live interactive screencast streaming.",
   "type": "module",
