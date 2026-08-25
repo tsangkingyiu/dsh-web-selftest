@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from 'react'
+import { createRoot } from 'react-dom/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { WebScreenshotCard } from './card-screenshot.js'
 import { WebLaunchCard } from './card-launch.js'
+import { LiveViewHost } from './panel.js'
 
 export const inject = ['slots', 'theme', 'locale']
 
@@ -60,4 +62,10 @@ export function apply(ctx: ClientContext): void {
   registerCard(themedCtx, 'web_launch', WebLaunchCard)
   registerCard(themedCtx, 'web_screenshot', WebScreenshotCard)
   registerCard(themedCtx, 'web_interact', WebScreenshotCard)
+  // Page-owned overlay host for the live view (outside the app's React tree).
+  // The runner's apply() return contract is a disposer; keep it clean.
+  const overlayRoot = document.createElement('div')
+  overlayRoot.id = 'dsh-web-selftest-liveview'
+  document.body.appendChild(overlayRoot)
+  createRoot(overlayRoot).render(<LiveViewHost />)
 }

@@ -1,1 +1,1 @@
-{"version":3,"file":"card-launch.d.ts","sourceRoot":"","sources":["../../../src/client/card-launch.tsx"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,iBAAiB,EAAE,MAAM,wCAAwC,CAAA;AAI/E;;;GAGG;AACH,wBAAgB,aAAa,CAAC,KAAK,EAAE,iBAAiB,+BA0BrD"}
+{"version":3,"file":"card-launch.d.ts","sourceRoot":"","sources":["../../../src/client/card-launch.tsx"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,iBAAiB,EAAE,MAAM,wCAAwC,CAAA;AAyB/E,wBAAgB,aAAa,CAAC,KAAK,EAAE,iBAAiB,+BA4CrD"}
