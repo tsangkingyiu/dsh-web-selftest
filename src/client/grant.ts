@@ -7,6 +7,14 @@ export interface ScreenshotGrant {
   expiresAt: number
 }
 
+/** One console entry as returned by the plugin's console route. */
+export interface ConsoleEntry {
+  kind: 'console' | 'pageerror'
+  type?: string
+  text: string
+  timestamp: number
+}
+
 interface GrantBody {
   token?: unknown
   expiresAt?: unknown
@@ -48,4 +56,18 @@ export async function grantStreamUrl(sessionId: string): Promise<ScreenshotGrant
     throw new Error('malformed grant answer')
   }
   return { url: body.streamUrl, expiresAt: body.expiresAt }
+}
+
+/** Fetch the session's console log + page errors from the plugin's console route. */
+export async function fetchConsoleEntries(sessionId: string): Promise<{ entries: ConsoleEntry[] }> {
+  const res = await fetch('/_dsh/dsh-web-selftest/console', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
+  if (res.status === 404) throw new Error('session not found (404)')
+  if (!res.ok) throw new Error(`console fetch failed (${res.status})`)
+  const body: unknown = await res.json()
+  if (!isRecord(body) || !Array.isArray(body.entries)) throw new Error('malformed console answer')
+  return { entries: body.entries as ConsoleEntry[] }
 }

@@ -309,6 +309,32 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
       },
     }))
 
+    // Console route: read-only console log + page errors for a session
+    disposers.push(webCtx.webServer.register({
+      kind: 'exact',
+      path: '/_dsh/dsh-web-selftest/console',
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
+          res.writeHead(403).end('forbidden')
+          return
+        }
+        let body = ''
+        for await (const chunk of req) body += chunk
+        const { sessionId } = JSON.parse(body)
+        const session = host.getSession(sessionId)
+        if (!session) {
+          res.writeHead(404).end('session not found')
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        const entries = [
+          ...session.consoleMessages.map(m => ({ kind: 'console' as const, type: m.type, text: m.text, timestamp: m.timestamp })),
+          ...session.pageErrors.map(e => ({ kind: 'pageerror' as const, text: e.message, timestamp: e.timestamp })),
+        ].sort((a, b) => a.timestamp - b.timestamp)
+        res.end(JSON.stringify({ sessionId, entries }))
+      },
+    }))
+
     // Status route: read-only session status
     disposers.push(webCtx.webServer.register({
       kind: 'exact',

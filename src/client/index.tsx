@@ -4,7 +4,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { WebScreenshotCard } from './card-screenshot.js'
 import { WebLaunchCard } from './card-launch.js'
-import { LiveViewHost } from './panel.js'
+import { LiveViewHost } from './live-view-host.js'
 
 export const inject = ['slots', 'theme', 'locale']
 

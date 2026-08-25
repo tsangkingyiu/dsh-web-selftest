@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { WebHostController } from './web-host.js'
+import { isDevicePreset } from './web-host.js'
 import { makeVisualizer } from './visualizer.js'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -35,12 +36,17 @@ export type WebTools = {
 export function createWebTools(host: WebHostController): WebTools {
   const webLaunch = defineTool({
     name: 'web_launch',
-    description: 'Launch a new isolated browser context for the current conversation. Returns a sessionId used by all other web_* tools.',
+    description: 'Launch a new isolated browser context for the current conversation. Returns a sessionId used by all other web_* tools. Defaults to a desktop browser; pass device="mobile" for a phone-class context (touch, mobile UA, narrow viewport).',
     parameters: {
       sessionId: {
         type: 'string',
         required: true,
         description: 'Unique identifier for this conversation/browser context.',
+      },
+      device: {
+        type: 'string',
+        enum: ['desktop', 'mobile'],
+        description: 'Device class for the browser context. Default "desktop".',
       },
     },
     output: {
@@ -49,15 +55,17 @@ export function createWebTools(host: WebHostController): WebTools {
         additionalProperties: false,
         properties: {
           sessionId: { type: 'string', required: true },
+          device: { type: 'string', required: true },
           viewport: { type: 'object', additionalProperties: true, required: true },
         },
       },
       render: renderJson,
     },
-    async execute(args: { sessionId: string }) {
-      const session = await host.createSession(args.sessionId)
+    async execute(args: { sessionId: string; device?: string }) {
+      const device = isDevicePreset(args.device) ? args.device : 'desktop'
+      const session = await host.createSession(args.sessionId, device)
       const viewport = session.page.viewportSize()
-      return { sessionId: session.sessionId, viewport: viewport ? { width: viewport.width, height: viewport.height } : {} }
+      return { sessionId: session.sessionId, device, viewport: viewport ? { width: viewport.width, height: viewport.height } : {} }
     },
   })
 
