@@ -35,6 +35,20 @@ export class WebHostController {
   private sessions = new Map<string, WebSession>()
   private idleTimer: NodeJS.Timeout | null = null
   private readonly idleTimeoutMs = 5 * 60 * 1000 // 5 minutes
+  /** Session ids with an open MJPEG stream — exempt from the idle sweep. */
+  private readonly streaming = new Set<string>()
+
+  /** Mark a session as actively streaming (idle sweep skips it). */
+  beginStreaming(sessionId: string): void {
+    this.streaming.add(sessionId)
+    this.resetIdleTimer()
+  }
+
+  /** Clear the streaming mark when its MJPEG connection ends. */
+  endStreaming(sessionId: string): void {
+    this.streaming.delete(sessionId)
+    this.resetIdleTimer()
+  }
 
   async ensureBrowser(): Promise<Browser> {
     if (this.browser && this.browser.isConnected()) return this.browser
@@ -89,6 +103,7 @@ export class WebHostController {
   }
 
   async closeSession(sessionId: string): Promise<void> {
+    this.streaming.delete(sessionId)
     const session = this.sessions.get(sessionId)
     if (session) {
       await session.context.close()
@@ -98,11 +113,26 @@ export class WebHostController {
 
   private resetIdleTimer() {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer)
-    this.idleTimer = setTimeout(() => { void this.dispose() }, this.idleTimeoutMs)
+    this.idleTimer = setTimeout(() => { void this.sweepIdle() }, this.idleTimeoutMs)
+  }
+
+  /**
+   * Idle sweep: dispose only when NOTHING is watching. Sessions with an open
+   * MJPEG stream are exempt — a passive viewer never calls getSession, so a
+   * plain idle sweep would kill the live view out from under them after 5 min.
+   */
+  private async sweepIdle(): Promise<void> {
+    if (this.streaming.size > 0) {
+      // Still streaming: re-arm and check again after another window.
+      this.resetIdleTimer()
+      return
+    }
+    await this.dispose()
   }
 
   async dispose(): Promise<void> {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer)
+    this.streaming.clear()
     for (const session of this.sessions.values()) {
       await session.context.close()
     }

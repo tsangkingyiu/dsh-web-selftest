@@ -46,11 +46,23 @@ export declare class WebHostController {
     private sessions;
     private idleTimer;
     private readonly idleTimeoutMs;
+    /** Session ids with an open MJPEG stream — exempt from the idle sweep. */
+    private readonly streaming;
+    /** Mark a session as actively streaming (idle sweep skips it). */
+    beginStreaming(sessionId: string): void;
+    /** Clear the streaming mark when its MJPEG connection ends. */
+    endStreaming(sessionId: string): void;
     ensureBrowser(): Promise<Browser>;
     createSession(sessionId: string, device?: DevicePreset): Promise<WebSession>;
     getSession(sessionId: string): WebSession | undefined;
     closeSession(sessionId: string): Promise<void>;
     private resetIdleTimer;
+    /**
+     * Idle sweep: dispose only when NOTHING is watching. Sessions with an open
+     * MJPEG stream are exempt — a passive viewer never calls getSession, so a
+     * plain idle sweep would kill the live view out from under them after 5 min.
+     */
+    private sweepIdle;
     dispose(): Promise<void>;
 }
 //# sourceMappingURL=web-host.d.ts.map

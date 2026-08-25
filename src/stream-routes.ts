@@ -289,6 +289,11 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
         await client.send('Page.enable')
         await client.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 1 })
 
+        // An open MJPEG stream means someone is watching: exempt the session
+        // from the idle sweep until this connection ends, or a passive viewer
+        // loses the live view after 5 quiet minutes.
+        host.beginStreaming(payload.sessionId)
+
         const onFrame = async (event: any) => {
           try {
             res.write(`--frame\r\ncontent-type: image/jpeg\r\n\r\n`)
@@ -301,7 +306,11 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
         }
         client.on('Page.screencastFrame', onFrame)
 
+        let cleaned = false
         req.on('close', async () => {
+          if (cleaned) return
+          cleaned = true
+          host.endStreaming(payload.sessionId)
           client.off('Page.screencastFrame', onFrame)
           await client.send('Page.stopScreencast').catch(() => {})
           await client.detach().catch(() => {})
