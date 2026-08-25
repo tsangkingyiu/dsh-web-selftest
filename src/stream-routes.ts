@@ -113,11 +113,6 @@ export function isLoopbackRemoteAddress(address: string | undefined): boolean {
   return hexadecimal !== null && (Number.parseInt(hexadecimal[1]!, 16) >>> 8) === 127
 }
 
-function isLoopbackHostname(hostname: string): boolean {
-  if (hostname === 'localhost' || hostname === '[::1]' || hostname === '::1') return true
-  return isIpv4LoopbackAddress(hostname)
-}
-
 function isIpv4LoopbackAddress(ip: string): boolean {
   const parts = ip.split('.')
   if (parts.length !== 4) return false
@@ -135,19 +130,24 @@ function requestAuthority(req: IncomingMessage): URL | undefined {
   }
 }
 
-function isLoopbackRequest(req: IncomingMessage): boolean {
+/**
+ * Host authorities whose browsers may reach the visual routes. Loopback covers
+ * direct local access; the deployment's Caddy vhost terminates TLS for the same
+ * host machine and proxies to the loopback-bound web server, so its origin is
+ * the operator's own. Any other Host (DNS-rebinding, foreign vhost) fails.
+ */
+const TRUSTED_AUTHORITIES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1', 'harness.kirby727.com'])
+
+function isTrustedRequest(req: IncomingMessage, requireOrigin: boolean): boolean {
+  // Defense in depth: the web server binds loopback, so every legitimate peer
+  // arrives from the local machine (directly or through the Caddy proxy).
   if (!isLoopbackRemoteAddress(req.socket?.remoteAddress)) return false
   const authority = requestAuthority(req)
-  return authority !== undefined && isLoopbackHostname(authority.hostname)
-}
-
-function isTrustedBrowserRequest(req: IncomingMessage, requireOrigin: boolean): boolean {
+  if (authority === undefined || !TRUSTED_AUTHORITIES.has(authority.hostname)) return false
   if (req.headers['sec-fetch-site'] === 'cross-site') return false
   if (requireOrigin) {
     const origin = req.headers.origin
     if (typeof origin !== 'string') return false
-    const authority = requestAuthority(req)
-    if (authority === undefined) return false
     return origin === authority.origin
   }
   return true
@@ -164,7 +164,7 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
       kind: 'prefix',
       path: '/_dsh/dsh-web-selftest/screenshot',
       handler: async (req: IncomingMessage, res: ServerResponse) => {
-        if (!isLoopbackRequest(req) || !isTrustedBrowserRequest(req, false)) {
+        if (!isTrustedRequest(req, false)) {
           res.writeHead(403).end('forbidden')
           return
         }
@@ -195,12 +195,48 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
       },
     }))
 
+    // Screenshot-grant route: mints a signed URL for one captured file
+    disposers.push(webCtx.webServer.register({
+      kind: 'exact',
+      path: '/_dsh/dsh-web-selftest/grant-screenshot',
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
+          res.writeHead(403).end('forbidden')
+          return
+        }
+        let body = ''
+        for await (const chunk of req) body += chunk
+        let parsed: { path?: unknown }
+        try {
+          parsed = JSON.parse(body)
+        } catch {
+          res.writeHead(400).end('invalid json')
+          return
+        }
+        if (typeof parsed.path !== 'string' || !parsed.path.startsWith('/')) {
+          res.writeHead(400).end('missing path')
+          return
+        }
+        // Containment decided at grant time too: never mint tokens for paths
+        // outside the plugin cache directory.
+        const realPath = resolve(parsed.path)
+        const allowedRoot = resolve(tmpdir(), 'dsh-web-selftest')
+        if (!realPath.startsWith(allowedRoot)) {
+          res.writeHead(403).end('path outside cache')
+          return
+        }
+        const { token, expiresAt } = await access.signScreenshotToken(realPath)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ token, expiresAt }))
+      },
+    }))
+
     // Grant route: mints a stream token for an existing session
     disposers.push(webCtx.webServer.register({
       kind: 'exact',
       path: '/_dsh/dsh-web-selftest/grant',
       handler: async (req: IncomingMessage, res: ServerResponse) => {
-        if (req.method !== 'POST' || !isLoopbackRequest(req) || !isTrustedBrowserRequest(req, true)) {
+        if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
           res.writeHead(403).end('forbidden')
           return
         }
@@ -223,7 +259,7 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
       kind: 'prefix',
       path: '/_dsh/dsh-web-selftest/stream',
       handler: async (req: IncomingMessage, res: ServerResponse) => {
-        if (!isLoopbackRequest(req) || !isTrustedBrowserRequest(req, false)) {
+        if (!isTrustedRequest(req, false)) {
           res.writeHead(403).end('forbidden')
           return
         }
@@ -278,7 +314,7 @@ export function installStreamRoutes(ctx: any, host: WebHostController): void {
       kind: 'exact',
       path: '/_dsh/dsh-web-selftest/status',
       handler: async (req: IncomingMessage, res: ServerResponse) => {
-        if (req.method !== 'POST' || !isLoopbackRequest(req) || !isTrustedBrowserRequest(req, true)) {
+        if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
           res.writeHead(403).end('forbidden')
           return
         }
