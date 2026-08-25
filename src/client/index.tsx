@@ -5,6 +5,7 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { WebScreenshotCard } from './card-screenshot.js'
 import { WebLaunchCard } from './card-launch.js'
 import { LiveViewHost } from './live-view-host.js'
+import { LAYOUT_CSS } from './layout-css.js'
 
 export const inject = ['slots', 'theme', 'locale']
 
@@ -64,6 +65,10 @@ export function apply(ctx: ClientContext): void {
   registerCard(themedCtx, 'web_interact', WebScreenshotCard)
   // Page-owned overlay host for the live view (outside the app's React tree).
   // The runner's apply() return contract is a disposer; keep it clean.
+  const layoutStyle = document.createElement('style')
+  layoutStyle.id = 'dsh-web-selftest-layout-css'
+  layoutStyle.textContent = LAYOUT_CSS
+  document.head.appendChild(layoutStyle)
   const overlayRoot = document.createElement('div')
   overlayRoot.id = 'dsh-web-selftest-liveview'
   document.body.appendChild(overlayRoot)

@@ -52,20 +52,29 @@ export function WebPanel({ sessionId, onClose }: WebPanelProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Push the app's layout instead of covering it: set a CSS variable on <body>
+  // that shifts content left by the panel width. Falls back gracefully — apps
+  // that don't reserve the space simply keep the overlay behaviour.
+  useEffect(() => {
+    document.body.style.setProperty('--dsh-liveview-width', `${width}px`)
+    return () => { document.body.style.removeProperty('--dsh-liveview-width') }
+  }, [width])
+
   return (
     <div style={{
       position: 'fixed', top: 0, right: 0, width: `${width}px`, height: '100vh',
       background: '#141414', borderLeft: '1px solid #333', zIndex: 2147483000,
       display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 24px rgba(0,0,0,0.5)',
     }}>
-      {/* Resize handle: invisible strip on the left edge */}
+      {/* Resize handle: invisible strip on the left edge. z-index above the
+          panes wrapper so the right half of the strip stays clickable. */}
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         style={{
           position: 'absolute', left: '-4px', top: 0, width: '8px', height: '100%',
-          cursor: 'col-resize', touchAction: 'none',
+          cursor: 'col-resize', touchAction: 'none', zIndex: 10,
         }}
         aria-label="Resize live view"
         data-testid="liveview-resize-handle"
@@ -76,9 +85,17 @@ export function WebPanel({ sessionId, onClose }: WebPanelProps) {
         <TabButton active={tab === 'console'} onClick={() => setTab('console')}>Console</TabButton>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#999', fontSize: '16px', cursor: 'pointer', marginLeft: 'auto' }} aria-label="Close live view">✕</button>
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {tab === 'stream' && <StreamPane sessionId={sessionId} />}
-        {tab === 'console' && <ConsolePane sessionId={sessionId} />}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        {/* Both panes stay mounted; visibility toggles. Unmounting the stream
+            <img> does not abort its multipart fetch (Chromium keeps it), which
+            leaks a CDP screencast per switch and starves later streams black.
+            Keeping it alive also makes tab switches instant. */}
+        <div style={{ display: tab === 'stream' ? 'flex' : 'none', flex: 1, minHeight: 0, flexDirection: 'column' }}>
+          <StreamPane sessionId={sessionId} />
+        </div>
+        <div style={{ display: tab === 'console' ? 'flex' : 'none', flex: 1, minHeight: 0, flexDirection: 'column' }}>
+          <ConsolePane sessionId={sessionId} />
+        </div>
       </div>
     </div>
   )
@@ -103,7 +120,19 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 function StreamPane({ sessionId }: { sessionId: string }) {
   const [status, setStatus] = useState<'connecting' | 'live' | 'ended' | 'error'>('connecting')
   const [grant, setGrant] = useState<{ url: string; expiresAt: number } | undefined>()
+  const [imgFailed, setImgFailed] = useState(false)
   const generationRef = useRef(0)
+
+  // Unmount hygiene: removing an <img> whose src is a multipart stream does NOT
+  // reliably abort the fetch — the MJPEG response (and its server-side CDP
+  // screencast) leaks per tab switch, starving later streams into black frames.
+  // Blanking src forces the abort. React detaches refs BEFORE running passive
+  // cleanups, so the element is captured via callback-ref list, not a bare ref.
+  const liveImgsRef = useRef<Set<HTMLImageElement>>(new Set())
+  useEffect(() => () => {
+    for (const img of liveImgsRef.current) img.src = ''
+    liveImgsRef.current.clear()
+  }, [])
 
   useEffect(() => {
     const generation = ++generationRef.current
@@ -116,6 +145,7 @@ function StreamPane({ sessionId }: { sessionId: string }) {
         const next = await grantStreamUrl(sessionId)
         if (cancelled || generationRef.current !== generation) return
         setGrant(next)
+        setImgFailed(false)
         setStatus('live')
         const ttl = Math.max(30_000, next.expiresAt - Date.now())
         timer = setTimeout(() => { void connect() }, Math.max(30_000, ttl - 90_000))
@@ -133,8 +163,18 @@ function StreamPane({ sessionId }: { sessionId: string }) {
       {status === 'connecting' && <div style={{ color: '#aaa' }}>Connecting…</div>}
       {status === 'ended' && <div style={{ color: '#fa6', fontSize: '13px' }}>Session ended</div>}
       {status === 'error' && <div style={{ color: '#f66', fontSize: '13px' }}>Stream unavailable</div>}
-      {status === 'live' && grant !== undefined && (
-        <img src={grant.url} alt="Live browser stream" style={{ maxWidth: '100%', maxHeight: '100%' }} />
+      {status === 'live' && grant !== undefined && !imgFailed && (
+        <img
+          ref={(el) => { if (el) liveImgsRef.current.add(el); else liveImgsRef.current.clear() }}
+          key={grant.url}
+          src={grant.url}
+          alt="Live browser stream"
+          onError={() => setImgFailed(true)}
+          style={{ maxWidth: '100%', maxHeight: '100%' }}
+        />
+      )}
+      {status === 'live' && grant !== undefined && imgFailed && (
+        <div style={{ color: '#f66', fontSize: '13px' }}>Stream interrupted — retrying…</div>
       )}
     </div>
   )
