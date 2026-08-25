@@ -1,4 +1,5 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
+import { attachActionVisualizer } from './visualizer.js'
 
 export type WebSession = {
   sessionId: string
@@ -27,6 +28,7 @@ export class WebHostController {
     }
     const browser = await this.ensureBrowser()
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+    attachActionVisualizer(context)
     const page = await context.newPage()
     const session: WebSession = {
       sessionId,

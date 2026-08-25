@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { WebHostController } from './web-host.js'
+import { makeVisualizer } from './visualizer.js'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -208,11 +209,20 @@ export function createWebTools(host: WebHostController): WebTools {
       if (ref) target = session.page.locator(`aria-ref=${ref}`)
       else if (selector) target = session.page.locator(selector)
 
+      // Visualize the action for live viewers: cursor travels to the target,
+      // clicks ripple, typing outlines the field. Best-effort — never fail the
+      // tool because the overlay could not run.
+      const vizTarget = { ...(ref !== undefined ? { ref } : {}), ...(selector !== undefined ? { selector } : {}), ...(x !== undefined && y !== undefined ? { x, y } : {}) }
+      const viz = makeVisualizer()
+      if (action === 'click' || action === 'press') await viz.move(vizTarget, session.page)
+      if (action === 'type' && selector) await viz.typing(selector, session.page)
+
       switch (action) {
         case 'click':
           if (target) await target.click()
           else if (x !== undefined && y !== undefined) await session.page.mouse.click(x, y)
           else throw new Error('click requires ref, selector, or coordinates')
+          await viz.click(vizTarget, session.page)
           break
         case 'type':
           if (!target) throw new Error('type requires ref or selector')
@@ -222,6 +232,7 @@ export function createWebTools(host: WebHostController): WebTools {
         case 'press':
           if (!key) throw new Error('press requires key')
           await session.page.keyboard.press(key)
+          await viz.click({}, session.page).catch(() => {})
           break
         case 'scroll':
           if (!direction) throw new Error('scroll requires direction')
@@ -230,6 +241,15 @@ export function createWebTools(host: WebHostController): WebTools {
       }
 
       await session.page.waitForTimeout(300)
+      if (action === 'type') {
+        // Keep the highlight visible through the settle wait, then clear it so
+        // the verification screenshot shows the resting state.
+        if (selector) await makeVisualizer().typing(selector, session.page).catch(() => {})
+        await session.page.evaluate(() => {
+          const w = globalThis as unknown as { __dshViz?: { clearHighlight(): void } }
+          w.__dshViz?.clearHighlight()
+        }).catch(() => {})
+      }
 
       let matched = true
       if (expect_text) matched = (await session.page.textContent('body'))?.includes(expect_text) ?? false
