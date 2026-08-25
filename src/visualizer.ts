@@ -7,6 +7,11 @@ import type { Page, Locator } from 'playwright-core'
  * state changes; this layer animates an arrow to the target, ripples on click,
  * and outlines the focused input while typing.
  *
+ * REAL mouse tracking: the page's own pointer events (hover, moves dispatched
+ * by page.mouse.*, user scripts) feed a passive listener that parks the cursor
+ * at the last known pointer position. Agent-driven locator actions bypass real
+ * events, so the pre-action move() animation remains authoritative there.
+ *
  * The installer is idempotent and self-healing: init scripts run per document,
  * but `setContent`-style document rewrites keep window globals while wiping DOM
  * nodes — so every call first verifies the ELEMENTS exist and reinstalls when
@@ -43,15 +48,20 @@ type VizWindow = { __dshViz?: VisualizerRuntime }
 const INSTALL_SOURCE = `
 (() => {
   const w = window
-  if (w.__dshVizInstalling) return
-  if (w.__dshViz && document.getElementById('dsh-viz-cursor')) return
+  const install = () => {
+    if (w.__dshVizInstalling) return
+    if (w.__dshViz && document.getElementById('dsh-viz-cursor')) return
 
-  // Init scripts run before any DOM exists on real navigations; defer until the
-  // document element materializes instead of throwing. setContent-style rewrites
-  // keep window globals but wipe nodes — the element check above catches that.
-  const root = document.documentElement
-  if (!root) return
-  w.__dshVizInstalling = true
+    // Init scripts run before any DOM exists on real navigations; RETRY per
+    // frame until the document element materializes instead of giving up. This
+    // matters beyond cosmetics: real-pointer tracking must be live on pages the
+    // agent never touches, so a later tool call cannot be relied on to heal.
+    const root = document.documentElement
+    if (!root) {
+      requestAnimationFrame(install)
+      return
+    }
+    w.__dshVizInstalling = true
 
   const css = document.createElement('style')
   css.id = 'dsh-viz-css'
@@ -97,13 +107,22 @@ const INSTALL_SOURCE = `
     'outline:2px solid rgba(90,170,255,0.95);background:rgba(90,170,255,0.12);' +
     'box-shadow:0 0 0 4px rgba(90,170,255,0.15);transition:all 120ms ease-out;'
 
+  // Real-pointer tracking: any mousemove on the page parks the cursor at that
+  // position UNLESS an animated move is in flight (the agent's choreographed
+  // travel must not be yanked aside mid-animation). Hover trails therefore show
+  // up in the stream exactly where the real input went.
+  let animating = false
+
   w.__dshViz = {
     async move(x, y) {
-      // Two RAFs: paint the current frame first, then commit the transform so
-      // the CSS transition animates the travel.
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
-      cursor.style.transform = 'translate(' + x + 'px, ' + y + 'px)'
-      await new Promise(r => setTimeout(r, 180))
+      animating = true
+      try {
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+        cursor.style.transform = 'translate(' + x + 'px, ' + y + 'px)'
+        await new Promise(r => setTimeout(r, 180))
+      } finally {
+        animating = false
+      }
     },
     ripple(x, y) {
       const el = ripple()
@@ -123,8 +142,34 @@ const INSTALL_SOURCE = `
     clearHighlight() {
       hl.style.display = 'none'
     },
+    track(x, y) {
+      if (animating) return
+      cursor.style.transform = 'translate(' + x + 'px, ' + y + 'px)'
+    },
   }
   w.__dshVizInstalling = false
+  }
+  install()
+})()
+`
+
+/**
+ * Passive real-pointer listener source. Registered ONLY via page.evaluate from
+ * the host (main world): addInitScript runs in Playwright's isolated world where
+ * its window listeners never see main-world pointer events.
+ */
+const TRACKER_SOURCE = `
+(() => {
+  const w = window
+  // Guard per-DOCUMENT so repeated evaluates stay idempotent; the document is
+  // fresh after navigations/setContent, so each new document re-attaches once.
+  if (document.__dshPointerTracking) return
+  document.__dshPointerTracking = true
+  if (w.__dshPointerTracker) w.removeEventListener('mousemove', w.__dshPointerTracker)
+  w.__dshPointerTracker = (e) => {
+    try { w.__dshViz && w.__dshViz.track(e.clientX, e.clientY) } catch {}
+  }
+  w.addEventListener('mousemove', w.__dshPointerTracker, { capture: true, passive: true })
 })()
 `
 
@@ -133,9 +178,10 @@ async function ensureInstalled(page: Page): Promise<boolean> {
     // Install-or-heal on every use: cheap idempotent check covering both the
     // pre-DOM navigation phase and post-setContent node wipes.
     await page.evaluate(INSTALL_SOURCE)
+    await page.evaluate(TRACKER_SOURCE)
     return await page.evaluate((): boolean => {
-      const w = globalThis as unknown as VizWindow
-      return typeof w.__dshViz === 'object' && w.__dshViz !== null
+      const w = globalThis as unknown as VizWindow & { __dshPointerTracker?: unknown }
+      return typeof w.__dshViz === 'object' && w.__dshViz !== null && typeof w.__dshPointerTracker === 'function'
     })
   } catch {
     return false
@@ -177,7 +223,11 @@ function clampToHeight(page: Page, y: number): number {
 
 /** Register the per-document installer on every future page of the context. */
 export function attachActionVisualizer(context: import('playwright-core').BrowserContext): void {
-  void context.addInitScript(INSTALL_SOURCE)
+  // Overlay install rides the init script (self-retrying past document-start).
+  // NOTE: the pointer tracker must NOT ride along — init scripts execute in an
+  // isolated world whose listeners never see main-world events. The tracker is
+  // attached by ensureInstalled() via main-world page.evaluate instead.
+  void context.addInitScript(`${INSTALL_SOURCE};`)
 }
 
 export function makeVisualizer(): ActionVisualizer {

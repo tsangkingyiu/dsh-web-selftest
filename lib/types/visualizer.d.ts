@@ -6,6 +6,11 @@ import type { Page } from 'playwright-core';
  * state changes; this layer animates an arrow to the target, ripples on click,
  * and outlines the focused input while typing.
  *
+ * REAL mouse tracking: the page's own pointer events (hover, moves dispatched
+ * by page.mouse.*, user scripts) feed a passive listener that parks the cursor
+ * at the last known pointer position. Agent-driven locator actions bypass real
+ * events, so the pre-action move() animation remains authoritative there.
+ *
  * The installer is idempotent and self-healing: init scripts run per document,
  * but `setContent`-style document rewrites keep window globals while wiping DOM
  * nodes — so every call first verifies the ELEMENTS exist and reinstalls when
