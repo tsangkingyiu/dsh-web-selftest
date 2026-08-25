@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-26
+
+### Fixed
+- **Stream went permanently black after visiting the Console tab** (`2d1feb3`):
+  unmounting an `<img>` whose src is a multipart MJPEG does NOT abort the fetch
+  in Chromium — every Stream→Console switch leaked a live CDP screencast
+  connection server-side, and reconnects starved into black frames. Both panes
+  now stay mounted and toggle via `display`, so the stream never tears down
+  (and tab switching is instant). An `onError` state surfaces broken streams
+  ("Stream interrupted — retrying…") instead of a silent black frame.
+- **Panel resize covered the chatbox** (`2d1feb3`): the panel was a pure
+  `position:fixed` overlay. It now sets `--dsh-liveview-width` on `<body>` while
+  open, and an injected rule gives `#root` a matching `margin-right` with a short
+  transition — the chat reflows beside the panel instead of hiding under it.
+- **Resize handle dead zone** (`2d1feb3`): the always-mounted panes wrapper
+  painted over the right half of the drag strip and ate its pointerdowns; the
+  handle now has an explicit `z-index`.
+
+### Verified (release gate)
+- Against a real local MJPEG server: connection count stays 1 across tab
+  round-trips (was 2+ and climbing), img stays mounted and decoding.
+- Drag widens the panel 520→624 px while the app column shifts in lockstep.
+
 ## [0.1.1] - 2026-08-26
 
 ### Added
