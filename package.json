@@ -30,7 +30,7 @@
   "packageManager": "npm@11.17.0",
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:client",
-    "build:client": "tsc -p tsconfig.client.json && tsdown src/client/index.tsx --format cjs --platform browser --target es2022 --tsconfig tsconfig.client.json --deps.never-bundle react --deps.never-bundle react/jsx-runtime --deps.never-bundle react-dom --deps.never-bundle react-dom/client --out-dir .client-build --clean --sourcemap --logLevel warn && node scripts/build-client.mjs",
+    "build:client": "tsc -p tsconfig.client.json && tsdown --config tsdown.config.ts --logLevel warn && node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
     "check": "npm run typecheck && npm test",
