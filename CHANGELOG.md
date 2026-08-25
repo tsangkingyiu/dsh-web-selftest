@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-08-26
+
+### Fixed
+- **Live view died after ~5 minutes of passive watching** (`48c660b`): the
+  host's idle sweep disposed all sessions (and the browser) after 5 minutes
+  without a `getSession` call — and a passive viewer never calls it, so simply
+  WATCHING the live view counted as idle. Verified with a shrunken window:
+  a session died mid-stream. Streaming sessions are now exempt: the MJPEG route
+  marks them on connect (`beginStreaming`) and unmarks on socket close
+  (`endStreaming`, idempotent); the idle timer re-arms instead of disposing
+  while any stream is open. Truly idle sessions are still collected, and ending
+  the stream lets the next window sweep.
+
+### Verified (release gate)
+- 3s test window: watched session alive past sweep; idle session swept;
+  watched session collected after stream ends.
+- Tests 15/15.
+
 ## [0.1.2] - 2026-08-26
 
 ### Fixed
