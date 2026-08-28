@@ -29,6 +29,8 @@ export type WebSession = {
     context: BrowserContext;
     page: Page;
     device: DevicePreset;
+    /** Epoch ms when the session was created — used by the TTL sweep. */
+    createdAt: number;
     consoleMessages: Array<{
         type: string;
         text: string;
@@ -46,6 +48,8 @@ export declare class WebHostController {
     private sessions;
     private idleTimer;
     private readonly idleTimeoutMs;
+    /** Sessions live at most this long from creation, stream or not. */
+    private readonly maxSessionTtlMs;
     /** Session ids with an open MJPEG stream — exempt from the idle sweep. */
     private readonly streaming;
     /** Mark a session as actively streaming (idle sweep skips it). */
@@ -61,6 +65,12 @@ export declare class WebHostController {
      * Idle sweep: dispose only when NOTHING is watching. Sessions with an open
      * MJPEG stream are exempt — a passive viewer never calls getSession, so a
      * plain idle sweep would kill the live view out from under them after 5 min.
+     *
+     * Safety rails:
+     *  - Sessions older than maxSessionTtlMs are force-closed even if streaming
+     *    (absolute TTL: a wedged screencast can no longer pin the browser).
+     *  - dispose() errors are caught so a failed close can never leave the
+     *    timer dead with the browser still running.
      */
     private sweepIdle;
     dispose(): Promise<void>;
