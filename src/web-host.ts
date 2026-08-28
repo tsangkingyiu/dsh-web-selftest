@@ -25,6 +25,8 @@ export type WebSession = {
   context: BrowserContext
   page: Page
   device: DevicePreset
+  /** Epoch ms when the session was created — used by the TTL sweep. */
+  createdAt: number
   consoleMessages: Array<{ type: string; text: string; timestamp: number }>
   pageErrors: Array<{ message: string; stack?: string; timestamp: number }>
   maxConsoleMessages: number
@@ -35,6 +37,8 @@ export class WebHostController {
   private sessions = new Map<string, WebSession>()
   private idleTimer: NodeJS.Timeout | null = null
   private readonly idleTimeoutMs = 5 * 60 * 1000 // 5 minutes
+  /** Sessions live at most this long from creation, stream or not. */
+  private readonly maxSessionTtlMs = 30 * 60 * 1000 // 30 minutes
   /** Session ids with an open MJPEG stream — exempt from the idle sweep. */
   private readonly streaming = new Set<string>()
 
@@ -76,6 +80,7 @@ export class WebHostController {
       context,
       page,
       device,
+      createdAt: Date.now(),
       consoleMessages: [],
       pageErrors: [],
       maxConsoleMessages: 200,
@@ -98,7 +103,10 @@ export class WebHostController {
   }
 
   getSession(sessionId: string): WebSession | undefined {
-    this.resetIdleTimer()
+    // Read-only lookup: does NOT re-arm the idle timer. Only createSession,
+    // beginStreaming and endStreaming reset the clock — this fixes the bug
+    // where a retrying MJPEG client (calling getSession on each reconnect)
+    // kept the browser alive forever.
     return this.sessions.get(sessionId)
   }
 
@@ -120,10 +128,25 @@ export class WebHostController {
    * Idle sweep: dispose only when NOTHING is watching. Sessions with an open
    * MJPEG stream are exempt — a passive viewer never calls getSession, so a
    * plain idle sweep would kill the live view out from under them after 5 min.
+   *
+   * Safety rails:
+   *  - Sessions older than maxSessionTtlMs are force-closed even if streaming
+   *    (absolute TTL: a wedged screencast can no longer pin the browser).
+   *  - dispose() errors are caught so a failed close can never leave the
+   *    timer dead with the browser still running.
    */
   private async sweepIdle(): Promise<void> {
-    if (this.streaming.size > 0) {
-      // Still streaming: re-arm and check again after another window.
+    const now = Date.now()
+    const expired: string[] = []
+    for (const [id, session] of this.sessions) {
+      if (now - session.createdAt >= this.maxSessionTtlMs) expired.push(id)
+    }
+    for (const id of expired) {
+      await this.closeSession(id).catch(() => {})
+    }
+    if (this.streaming.size > 0 || this.sessions.size > 0) {
+      // Still something alive (streams exempt from idle dispose, or a close
+      // is mid-flight): re-arm and check again after another window.
       this.resetIdleTimer()
       return
     }
@@ -134,11 +157,11 @@ export class WebHostController {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer)
     this.streaming.clear()
     for (const session of this.sessions.values()) {
-      await session.context.close()
+      await session.context.close().catch(() => {})
     }
     this.sessions.clear()
     if (this.browser !== null) {
-      await this.browser.close()
+      await this.browser.close().catch(() => {})
       this.browser = null
     }
   }

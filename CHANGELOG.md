@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-08-29
+
+### Fixed
+- **Browser never disposed when a retrying MJPEG client pinned the idle
+  sweep** (#1): `getSession()` re-armed the 5-minute timer on every stream
+  (re)connect and `sweepIdle()` always re-armed while a streaming mark was
+  set, so an abandoned/retrying viewer (or a stale mark from a socket whose
+  close event never fired) kept `chrome-headless-shell` alive indefinitely —
+  observed 24h+ at ~98% CPU (SwiftShader screencast rendering). Fixes:
+  - `getSession()` is now a read-only lookup; the timer is only re-armed by
+    `createSession` / `beginStreaming` / `endStreaming`.
+  - Absolute per-session TTL (30 min from creation): the sweep force-closes
+    expired sessions even if streaming — a wedged screencast can no longer
+    pin the browser.
+  - `sweepIdle()` re-arms only while sessions still exist (fresh or a close
+    in flight) and always reaches `dispose()` once the map is empty.
+  - `dispose()` guards each `context.close()` / `browser.close()` with
+    `.catch(() => {})` so one failed close can no longer leave the browser
+    running with a dead timer.
+
+### Verified (release gate)
+- Live repro reproduced the leak (browser 24h old, GPU process 98% CPU),
+  manual kill + fix applied, `npm run check` typecheck clean, tests 15/15.
+- dsh-web restarted on 0.1.4; boot clean; no stray chromium processes.
+
 ## [0.1.3] - 2026-08-26
 
 ### Fixed
