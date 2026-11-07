@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { WebScreenshotCard } from './card-screenshot.js'
 import { WebLaunchCard } from './card-launch.js'
